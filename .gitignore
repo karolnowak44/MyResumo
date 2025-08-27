@@ -168,6 +168,40 @@ node_modules
 *.aux
 *.out
 .env
+.env.local
+.env.production
+.env.staging
+.env.development
 
+# Docker Compose and Container files
+docker-compose.prod.yml
+docker-compose.staging.yml
+docker-compose.local.yml
+*.override.local.yml
+
+# Docker volumes and data
+.docker/
+volumes/
+data/mongodb/
+data/redis/
+
+# Container logs
+logs/
+*.log
+
+# Database dumps and backups
+*.sql
+*.dump
+*.backup
+
+# Secrets and credentials
+secrets/
+credentials/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Production and staging specific files
 myresumo-prd.md
 .ruff_cache/

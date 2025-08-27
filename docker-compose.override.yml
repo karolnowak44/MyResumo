@@ -1,0 +1,62 @@
+version: "3.8"
+
+# Docker Compose override for local development
+# This file is automatically used when running docker-compose up
+# It provides development-specific configurations and volume mounts
+
+services:
+  copilot-api:
+    # Mount source code for hot reloading during development
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - DEBUG=true
+    # Override healthcheck for development
+    healthcheck:
+      interval: 10s
+      timeout: 5s
+      retries: 2
+
+  myresumo:
+    # Development environment variables
+    environment:
+      - DEBUG=true
+      - LOG_LEVEL=debug
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    # Mount application code for development
+    volumes:
+      - ./app:/app/app:ro
+      - ./data:/app/data:ro
+    # Override healthcheck for faster feedback during development
+    healthcheck:
+      interval: 10s
+      timeout: 5s
+      retries: 2
+
+  mongodb:
+    # Development MongoDB configuration
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=devpassword
+      - MONGO_INITDB_DATABASE=myresumo_dev
+    # Expose MongoDB logs for development debugging
+    command: ["mongod", "--logpath", "/var/log/mongodb/mongod.log", "--logappend"]
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+      - mongodb_logs:/var/log/mongodb
+
+  redis:
+    # Development Redis configuration
+    command: redis-server --appendonly yes --requirepass devredispassword --loglevel debug
+    # Expose Redis for development tools
+    ports:
+      - "6379:6379"
+
+# Additional volumes for development
+volumes:
+  mongodb_logs:
+    driver: local

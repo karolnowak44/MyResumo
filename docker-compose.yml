@@ -1,0 +1,96 @@
+services:
+  # GitHub Copilot API proxy service
+  copilot-api:
+    build: .
+    ports:
+      - "4141:4141"
+    environment:
+      - GH_TOKEN=${GH_TOKEN}
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4141/health", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # MyResumo AI-powered resume customization platform
+  myresumo:
+    image: ghcr.io/analyticace/myresumo:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - API_KEY=${API_KEY:-sk-placeholder}
+      - API_BASE=${API_BASE:-http://copilot-api:4141}
+      - MODEL_NAME=${MODEL_NAME:-gpt-5}
+      - MONGODB_URI=${MONGODB_URI:-mongodb://mongodb:27017/myresumo}
+    restart: unless-stopped
+    depends_on:
+      - copilot-api
+      - mongodb
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # MongoDB database for MyResumo data persistence
+  mongodb:
+    image: mongo:7-jammy
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USERNAME:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-password}
+      - MONGO_INITDB_DATABASE=${MONGO_INITDB_DATABASE:-myresumo}
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis cache for improved performance (optional)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redispassword}
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# Persistent storage volumes
+volumes:
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+  redis_data:
+    driver: local
+
+# Internal Docker network for service communication
+networks:
+  app-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

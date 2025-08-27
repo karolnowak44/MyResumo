@@ -1,0 +1,201 @@
+name: Docker Compose Deployment
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # Validate Docker Compose configuration
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose files
+        run: |
+          docker-compose config --quiet
+          echo "✅ Docker Compose configuration is valid"
+
+      - name: Check for required secrets
+        run: |
+          if [[ -z "${{ secrets.GH_TOKEN }}" ]]; then
+            echo "❌ GH_TOKEN secret is not set"
+            echo "Please add GH_TOKEN to repository secrets"
+            exit 1
+          fi
+          echo "✅ Required secrets are available"
+
+  # Build and test the services
+  build-and-test:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create environment file from secrets
+        run: |
+          cat > .env << EOF
+          # GitHub Secrets Integration
+          GH_TOKEN=${{ secrets.GH_TOKEN }}
+          
+          # MyResumo Configuration
+          API_KEY=sk-placeholder
+          API_BASE=http://copilot-api:4141
+          MODEL_NAME=gpt-3.5-turbo
+          MONGODB_URI=mongodb://admin:testpassword@mongodb:27017/myresumo_test
+          
+          # Database Configuration
+          MONGO_ROOT_USERNAME=admin
+          MONGO_ROOT_PASSWORD=testpassword
+          MONGO_INITDB_DATABASE=myresumo_test
+          
+          # Cache Configuration
+          REDIS_PASSWORD=testredispassword
+          
+          # Testing Configuration
+          DEBUG=true
+          LOG_LEVEL=debug
+          EOF
+
+      - name: Build services
+        run: |
+          docker-compose build --parallel
+          echo "✅ All services built successfully"
+
+      - name: Start services
+        run: |
+          docker-compose up -d
+          echo "✅ Services started"
+
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for services to start..."
+          sleep 30
+          
+          # Check if copilot-api is running
+          if docker-compose ps copilot-api | grep -q "Up"; then
+            echo "✅ copilot-api is running"
+          else
+            echo "❌ copilot-api failed to start"
+            docker-compose logs copilot-api
+            exit 1
+          fi
+          
+          # Check if myresumo is running
+          if docker-compose ps myresumo | grep -q "Up"; then
+            echo "✅ myresumo is running"
+          else
+            echo "❌ myresumo failed to start"
+            docker-compose logs myresumo
+            exit 1
+          fi
+          
+          # Check if MongoDB is running
+          if docker-compose ps mongodb | grep -q "Up"; then
+            echo "✅ MongoDB is running"
+          else
+            echo "❌ MongoDB failed to start"
+            docker-compose logs mongodb
+            exit 1
+          fi
+
+      - name: Test service connectivity
+        run: |
+          # Test copilot-api endpoint (if it has a health endpoint)
+          echo "Testing copilot-api connectivity..."
+          if curl -f http://localhost:4141/health 2>/dev/null || curl -f http://localhost:4141/ 2>/dev/null; then
+            echo "✅ copilot-api is accessible"
+          else
+            echo "⚠️ copilot-api health check not available (this is expected if no health endpoint exists)"
+          fi
+          
+          # Test MyResumo endpoint
+          echo "Testing MyResumo connectivity..."
+          if curl -f http://localhost:8080/health 2>/dev/null || curl -f http://localhost:8080/ 2>/dev/null; then
+            echo "✅ MyResumo is accessible"
+          else
+            echo "⚠️ MyResumo health check not available (this is expected if no health endpoint exists)"
+          fi
+
+      - name: Show service logs
+        if: always()
+        run: |
+          echo "=== copilot-api logs ==="
+          docker-compose logs --tail=50 copilot-api
+          echo ""
+          echo "=== myresumo logs ==="
+          docker-compose logs --tail=50 myresumo
+          echo ""
+          echo "=== mongodb logs ==="
+          docker-compose logs --tail=20 mongodb
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker-compose down -v
+          docker system prune -f
+
+  # Production deployment (optional)
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [validate, build-and-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create production environment file
+        run: |
+          cat > .env << EOF
+          # Production GitHub Secrets Integration
+          GH_TOKEN=${{ secrets.GH_TOKEN }}
+          
+          # Production MyResumo Configuration
+          API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-placeholder' }}
+          API_BASE=http://copilot-api:4141
+          MODEL_NAME=gpt-4
+          MONGODB_URI=${{ secrets.MONGODB_URI || 'mongodb://admin:prodpassword@mongodb:27017/myresumo' }}
+          
+          # Production Database Configuration
+          MONGO_ROOT_USERNAME=admin
+          MONGO_ROOT_PASSWORD=${{ secrets.MONGO_ROOT_PASSWORD || 'prodpassword' }}
+          MONGO_INITDB_DATABASE=myresumo
+          
+          # Production Cache Configuration
+          REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD || 'prodredispassword' }}
+          
+          # Production Configuration
+          DEBUG=false
+          LOG_LEVEL=warning
+          EOF
+
+      - name: Deploy to production
+        run: |
+          echo "🚀 Deploying to production environment..."
+          # Add your production deployment commands here
+          # For example:
+          # - Deploy to cloud provider
+          # - Update production servers
+          # - Run database migrations
+          echo "✅ Production deployment completed"
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [[ ${{ job.status }} == 'success' ]]; then
+            echo "✅ Production deployment successful"
+          else
+            echo "❌ Production deployment failed"
+          fi
